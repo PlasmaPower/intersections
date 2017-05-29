@@ -1,0 +1,13 @@
+[package]
+authors = ["Lee Bousfield <ljbousfield@gmail.com>"]
+name = "intersections"
+version = "0.1.0"
+
+[dependencies]
+clap = {version = "2", features = ["yaml"]}
+csv = "1.0.0-beta.3"
+env_logger = "0.4"
+jobsteal = "0.5"
+log = "0.3"
+serde = "1"
+serde_derive = "1"

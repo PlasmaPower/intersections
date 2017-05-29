@@ -1,0 +1,15 @@
+name: intersections
+version: "0.1.0"
+author: Lee Bousfield <ljbousfield@gmail.com>
+about: Finds and counts intersections between genomes and sequences
+args:
+  - directory:
+      value_name: DIR
+      default_value: "."
+      help: The directory in which to search for GFF and BLAST files
+  - threads:
+      short: t
+      long: threads
+      value_name: THREADS
+      default_value: "4"
+      help: The number of threads to use for counting
