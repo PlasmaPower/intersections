@@ -1,13 +1,13 @@
 use std::str;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::fs::{self, File, read_dir, ReadDir};
 use std::io::{self, BufRead, BufReader};
 
 use csv;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Gene {
     pub name: Option<String>,
     pub product: String,
@@ -29,10 +29,13 @@ impl Iterator for GffIter {
                 Err(e) => return Some(Err(e)),
             };
             let line = &mut self.buffer;
-            if line.get(0) == Some(&b'#') {
+            if line.is_empty() {
+                return None;
+            }
+            if line[0] == b'#' {
                 continue;
             }
-            let mut line = line.splitn(8, |x| *x == b'\t');
+            let mut line = line.splitn(9, |x| *x == b'\t');
             let start: usize = match line.nth(3) {
                 Some(x) => match str::from_utf8(x).ok().and_then(|x| x.parse().ok()) {
                     Some(x) => x,
@@ -76,10 +79,16 @@ impl Iterator for GffIter {
                         continue;
                     }
                 };
-                if key == b"Name" {
-                    name = Some(String::from_utf8_lossy(value).into_owned());
+                let to_set = if key == b"Name" {
+                    Some(&mut name)
                 } else if key == b"product" {
-                    product = Some(String::from_utf8_lossy(value).into_owned());
+                    Some(&mut product)
+                } else {
+                    None
+                };
+                if let Some(var) = to_set {
+                    let value = String::from_utf8_lossy(value).trim().to_string();
+                    *var = Some(value);
                 }
             }
             let product = match product {
@@ -138,13 +147,13 @@ pub struct Genome {
 
 pub struct GenomeIter {
     dir: ReadDir,
-    found: HashMap<String, (Option<String>, Option<String>)>,
+    found: HashMap<String, (Option<PathBuf>, Option<PathBuf>)>,
 }
 
 const GFF_POSTFIX: &'static str = ".gff";
 const BLAST_POSTFIX: &'static str = ".bla";
 
-const OPTIONAL_PREFIX: &'static str = "R";
+const OPTIONAL_PREFIX: &'static str = "R_";
 
 impl Iterator for GenomeIter {
     type Item = io::Result<Genome>;
@@ -163,19 +172,19 @@ impl Iterator for GenomeIter {
             if !metadata.is_file() {
                 continue;
             }
-            let file_name = match entry.file_name().into_string() {
+            let file_path = entry.path();
+            let name = match entry.file_name().into_string() {
                 Ok(x) => x,
                 Err(_) => {
                     warn!("Found non-UTF8 file");
                     continue;
                 }
             };
-            let name = file_name.clone();
             let mut name = name.as_str();
-            let is_blast = if file_name.ends_with(GFF_POSTFIX) {
+            let is_blast = if name.ends_with(GFF_POSTFIX) {
                 name = &name[..(name.len() - GFF_POSTFIX.len())];
                 false
-            } else if file_name.ends_with(BLAST_POSTFIX) {
+            } else if name.ends_with(BLAST_POSTFIX) {
                 name = &name[..(name.len() - BLAST_POSTFIX.len())];
                 true
             } else {
@@ -192,9 +201,9 @@ impl Iterator for GenomeIter {
                     &mut genome_files.1
                 };
                 if ours.is_some() {
-                    warn!("Encountered duplicate file: {}", file_name);
+                    warn!("Encountered duplicate file: {:?}", file_path);
                 }
-                *ours = Some(file_name);
+                *ours = Some(file_path);
             }
             if let Some(ref blast_file) = genome_files.0 {
                 if let Some(ref gff_file) = genome_files.1 {

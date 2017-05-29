@@ -24,7 +24,7 @@ fn main() {
     let args = load_yaml!("../cli.yml");
     let args = clap::App::from_yaml(args).get_matches();
     env_logger::init().unwrap();
-    let mut pool = make_pool(0).unwrap();
+    let mut pool = make_pool(args.value_of("threads").unwrap().parse().expect("Failed to parse thread count")).unwrap();
     let genomes = find_genomes(args.value_of("directory").unwrap()).expect("Failed to find genomes");
     let gene_counts = Mutex::new(HashMap::new());
     pool.scope(|scope| {
@@ -38,7 +38,7 @@ fn main() {
                 let mut sequence_count: Vec<u16> = Vec::new();
                 for item in genome.blast_iter {
                     let range = item.expect("IO Error reading from BLAST file");
-                    if range.end < sequence_count.len() {
+                    if range.end > sequence_count.len() {
                         sequence_count.resize(range.end, 0);
                     }
                     for index in range {
