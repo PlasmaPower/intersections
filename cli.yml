@@ -13,3 +13,7 @@ args:
       value_name: THREADS
       default_value: "4"
       help: The number of threads to use for counting
+  - sort:
+      short: s
+      long: sort
+      help: When enabled, sort the output by count (descending)

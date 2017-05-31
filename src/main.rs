@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::sync::Mutex;
 use std::collections::HashMap;
 
@@ -18,7 +18,21 @@ extern crate serde_derive;
 extern crate clap;
 
 mod find_genomes;
-use find_genomes::find_genomes;
+use find_genomes::{find_genomes, Gene};
+
+fn print_counts<I: IntoIterator<Item=(Gene, u16)>, W: Write>(writer: &mut csv::Writer<W>, gene_counts: I) {
+    for (gene, count) in gene_counts {
+        let tmp;
+        let name = match gene.name {
+            Some(name) => {
+                tmp = name;
+                tmp.as_str()
+            }
+            None => "unknown",
+        };
+        writer.write_record(&[name, gene.product.as_str(), count.to_string().as_str()]).expect("IO Error writing to CSV");
+    }
+}
 
 fn main() {
     let args = load_yaml!("../cli.yml");
@@ -72,16 +86,13 @@ fn main() {
     let mut writer = csv::Writer::from_writer(stdout.lock());
     writer.write_record(&["name", "product", "count"]).expect("IO Error writing to CSV");
     let gene_counts = gene_counts.into_inner().unwrap();
-    for (gene, count) in gene_counts {
-        let tmp;
-        let name = match gene.name {
-            Some(name) => {
-                tmp = name;
-                tmp.as_str()
-            }
-            None => "unknown",
-        };
-        writer.write_record(&[name, gene.product.as_str(), count.to_string().as_str()]).expect("IO Error writing to CSV");
+    if args.is_present("sort") {
+        let mut gene_counts = gene_counts.into_iter().collect::<Vec<_>>();
+        // descending sort by count
+        gene_counts.sort_by(|ref a, ref b| b.1.cmp(&a.1));
+        print_counts(&mut writer, gene_counts);
+    } else {
+        print_counts(&mut writer, gene_counts);
     }
     writer.flush().expect("IO Error flushing CSV");
 }
