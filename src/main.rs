@@ -38,7 +38,8 @@ fn main() {
     let args = load_yaml!("../cli.yml");
     let args = clap::App::from_yaml(args).get_matches();
     env_logger::init().unwrap();
-    let mut pool = make_pool(args.value_of("threads").unwrap().parse().expect("Failed to parse thread count")).unwrap();
+    let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
+    let mut pool = make_pool(thread_count - 1).unwrap();
     let genomes = find_genomes(args.value_of("directory").unwrap()).expect("Failed to find genomes");
     let gene_counts = Mutex::new(HashMap::new());
     pool.scope(|scope| {
