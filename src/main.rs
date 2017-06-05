@@ -1,5 +1,8 @@
+#![feature(integer_atomics)]
+
 use std::io::{self, Write};
-use std::sync::Mutex;
+use std::sync::Arc;
+use std::sync::atomic::{self, AtomicU16};
 use std::collections::HashMap;
 
 extern crate csv;
@@ -41,17 +44,27 @@ fn main() {
     let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
     let mut pool = make_pool(thread_count - 1).unwrap();
     let genomes = find_genomes(args.value_of("directory").unwrap()).expect("Failed to find genomes");
-    let gene_counts = Mutex::new(HashMap::new());
+    let mut gene_counts: HashMap<Gene, Arc<AtomicU16>> = HashMap::new();
+    let genomes = genomes.map(|genome| {
+        let genome = genome.expect("Failed to list and open genomes");
+        info!("Found genome {}", genome.name);
+        let gff = genome.gff_iter
+            .map(|item| item.expect("Error reading from GFF file"))
+            .map(|(gene, range)| {
+                let count_ref = gene_counts.entry(gene).or_insert_with(|| Arc::new(AtomicU16::new(0)));
+                (count_ref.clone(), range)
+            })
+            .collect::<Vec<_>>();
+        (genome.blast_iter, gff)
+    }).collect::<Vec<_>>();
+    if genomes.is_empty() {
+        warn!("Failed to find genomes to process");
+    }
     pool.scope(|scope| {
-        let gene_counts = &gene_counts;
-        let mut found_genome = false;
         for genome in genomes {
-            found_genome = true;
-            let genome = genome.expect("Filed to open genomes");
-            info!("Found genome {}", genome.name);
             scope.submit(move || {
                 let mut sequence_count: Vec<u16> = Vec::new();
-                for item in genome.blast_iter {
+                for item in genome.0 {
                     let range = item.expect("IO Error reading from BLAST file");
                     if range.end > sequence_count.len() {
                         sequence_count.resize(range.end, 0);
@@ -60,35 +73,26 @@ fn main() {
                         sequence_count[index] += 1;
                     }
                 }
-                let gff_iter = genome.gff_iter;
-                let res = (|| -> csv::Result<()> {
-                    let mut gene_counts = gene_counts.lock().unwrap();
-                    for item in gff_iter {
-                        let (gene, range) = item?;
-                        let mut count = 0;
-                        for index in range {
-                            if let Some(x) = sequence_count.get(index) {
-                                count += *x;
-                            }
+                for (count, range) in genome.1 {
+                    let mut tmp_count = 0;
+                    for index in range {
+                        if let Some(x) = sequence_count.get(index) {
+                            tmp_count += *x;
                         }
-                        *gene_counts.entry(gene).or_insert(0) += count;
                     }
-                    Ok(())
-                })();
-                // as to not break the mutex
-                res.expect("IO Error reading from GFF file");
+                    count.fetch_add(tmp_count, atomic::Ordering::Relaxed);
+                }
             });
-        }
-        if !found_genome {
-            warn!("Failed to find genomes to process");
         }
     });
     let stdout = io::stdout();
     let mut writer = csv::Writer::from_writer(stdout.lock());
     writer.write_record(&["name", "product", "count"]).expect("IO Error writing to CSV");
-    let gene_counts = gene_counts.into_inner().unwrap();
+    let gene_counts = gene_counts
+        .into_iter()
+        .map(|(gene, count)| (gene, Arc::try_unwrap(count).unwrap().into_inner()));
     if args.is_present("sort") {
-        let mut gene_counts = gene_counts.into_iter().collect::<Vec<_>>();
+        let mut gene_counts = gene_counts.collect::<Vec<_>>();
         // descending sort by count
         gene_counts.sort_by(|ref a, ref b| b.1.cmp(&a.1));
         print_counts(&mut writer, gene_counts);

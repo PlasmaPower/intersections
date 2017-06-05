@@ -7,7 +7,7 @@ use std::io::{self, BufRead, BufReader};
 
 use csv;
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Gene {
     pub name: Option<String>,
     pub product: String,
