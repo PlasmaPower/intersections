@@ -1,5 +1,6 @@
 #![feature(integer_atomics)]
 
+use std::thread;
 use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicU32};
@@ -55,16 +56,22 @@ fn main() {
                 (count_ref.clone(), range)
             })
             .collect::<Vec<_>>();
-        (genome.blast_iter, gff)
+        (genome.name, genome.blast_iter, gff)
     }).collect::<Vec<_>>();
     if genomes.is_empty() {
         warn!("Failed to find genomes to process");
     }
+    info!("Created gene_counts HashMap");
     pool.scope(|scope| {
         for genome in genomes {
             scope.submit(move || {
-                let mut sequence_count: Vec<u8> = Vec::new();
-                for item in genome.0 {
+                let our_thread = thread::current();
+                let thread_name = our_thread.name().unwrap_or("[unknown]");
+                info!("{}: now working on: {}", thread_name, genome.0);
+                // TODO this can probably be changed to Vec<u8>
+                // However, we want to avoid silent overflows
+                let mut sequence_count: Vec<u16> = Vec::new();
+                for item in genome.1 {
                     let range = item.expect("IO Error reading from BLAST file");
                     if range.end > sequence_count.len() {
                         sequence_count.resize(range.end, 0);
@@ -73,7 +80,7 @@ fn main() {
                         sequence_count[index] += 1;
                     }
                 }
-                for (count, range) in genome.1 {
+                for (count, range) in genome.2 {
                     let mut tmp_count: u32 = 0;
                     for index in range {
                         if let Some(x) = sequence_count.get(index) {
@@ -85,6 +92,7 @@ fn main() {
             });
         }
     });
+    info!("Finished counting");
     let stdout = io::stdout();
     let mut writer = csv::Writer::from_writer(stdout.lock());
     writer.write_record(&["name", "product", "count"]).expect("IO Error writing to CSV");
