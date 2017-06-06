@@ -3,7 +3,7 @@
 use std::thread;
 use std::io::{self, Write};
 use std::sync::Arc;
-use std::sync::atomic::{self, AtomicU32};
+use std::sync::atomic::{self, AtomicU64};
 use std::collections::HashMap;
 
 extern crate csv;
@@ -24,7 +24,7 @@ extern crate clap;
 mod find_genomes;
 use find_genomes::{find_genomes, Gene};
 
-fn print_counts<I: IntoIterator<Item=(Gene, u32)>, W: Write>(writer: &mut csv::Writer<W>, gene_counts: I) {
+fn print_counts<I: IntoIterator<Item=(Gene, u64)>, W: Write>(writer: &mut csv::Writer<W>, gene_counts: I) {
     for (gene, count) in gene_counts {
         let tmp;
         let name = match gene.name {
@@ -45,14 +45,14 @@ fn main() {
     let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
     let mut pool = make_pool(thread_count - 1).unwrap();
     let genomes = find_genomes(args.value_of("directory").unwrap()).expect("Failed to find genomes");
-    let mut gene_counts: HashMap<Gene, Arc<AtomicU32>> = HashMap::new();
+    let mut gene_counts: HashMap<Gene, Arc<AtomicU64>> = HashMap::new();
     let genomes = genomes.map(|genome| {
         let genome = genome.expect("Failed to list and open genomes");
         info!("Found genome {}", genome.name);
         let gff = genome.gff_iter
             .map(|item| item.expect("Error reading from GFF file"))
             .map(|(gene, range)| {
-                let count_ref = gene_counts.entry(gene).or_insert_with(|| Arc::new(AtomicU32::new(0)));
+                let count_ref = gene_counts.entry(gene).or_insert_with(|| Arc::new(AtomicU64::new(0)));
                 (count_ref.clone(), range)
             })
             .collect::<Vec<_>>();
@@ -67,7 +67,7 @@ fn main() {
             scope.submit(move || {
                 let our_thread = thread::current();
                 let thread_name = our_thread.name().unwrap_or("[unknown]");
-                info!("{}: now working on: {}", thread_name, genome.0);
+                info!("Thread {}: now working on: {}", thread_name, genome.0);
                 // TODO this can probably be changed to Vec<u8>
                 // However, we want to avoid silent overflows
                 let mut sequence_count: Vec<u16> = Vec::new();
@@ -81,7 +81,7 @@ fn main() {
                     }
                 }
                 for (count, range) in genome.2 {
-                    let mut tmp_count: u32 = 0;
+                    let mut tmp_count: u64 = 0;
                     for index in range {
                         if let Some(x) = sequence_count.get(index) {
                             tmp_count += (*x).into();
