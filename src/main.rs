@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 use std::sync::Arc;
-use std::sync::atomic::{self, AtomicU16};
+use std::sync::atomic::{self, AtomicU32};
 use std::collections::HashMap;
 
 extern crate csv;
@@ -23,7 +23,7 @@ extern crate clap;
 mod find_genomes;
 use find_genomes::{find_genomes, Gene};
 
-fn print_counts<I: IntoIterator<Item=(Gene, u16)>, W: Write>(writer: &mut csv::Writer<W>, gene_counts: I) {
+fn print_counts<I: IntoIterator<Item=(Gene, u32)>, W: Write>(writer: &mut csv::Writer<W>, gene_counts: I) {
     for (gene, count) in gene_counts {
         let tmp;
         let name = match gene.name {
@@ -44,14 +44,14 @@ fn main() {
     let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
     let mut pool = make_pool(thread_count - 1).unwrap();
     let genomes = find_genomes(args.value_of("directory").unwrap()).expect("Failed to find genomes");
-    let mut gene_counts: HashMap<Gene, Arc<AtomicU16>> = HashMap::new();
+    let mut gene_counts: HashMap<Gene, Arc<AtomicU32>> = HashMap::new();
     let genomes = genomes.map(|genome| {
         let genome = genome.expect("Failed to list and open genomes");
         info!("Found genome {}", genome.name);
         let gff = genome.gff_iter
             .map(|item| item.expect("Error reading from GFF file"))
             .map(|(gene, range)| {
-                let count_ref = gene_counts.entry(gene).or_insert_with(|| Arc::new(AtomicU16::new(0)));
+                let count_ref = gene_counts.entry(gene).or_insert_with(|| Arc::new(AtomicU32::new(0)));
                 (count_ref.clone(), range)
             })
             .collect::<Vec<_>>();
@@ -63,7 +63,7 @@ fn main() {
     pool.scope(|scope| {
         for genome in genomes {
             scope.submit(move || {
-                let mut sequence_count: Vec<u16> = Vec::new();
+                let mut sequence_count: Vec<u8> = Vec::new();
                 for item in genome.0 {
                     let range = item.expect("IO Error reading from BLAST file");
                     if range.end > sequence_count.len() {
@@ -74,10 +74,10 @@ fn main() {
                     }
                 }
                 for (count, range) in genome.1 {
-                    let mut tmp_count = 0;
+                    let mut tmp_count: u32 = 0;
                     for index in range {
                         if let Some(x) = sequence_count.get(index) {
-                            tmp_count += *x;
+                            tmp_count += (*x).into();
                         }
                     }
                     count.fetch_add(tmp_count, atomic::Ordering::Relaxed);
