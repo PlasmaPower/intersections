@@ -68,9 +68,7 @@ fn main() {
                 let our_thread = thread::current();
                 let thread_name = our_thread.name().unwrap_or("[unknown]");
                 info!("Thread {}: now working on: {}", thread_name, genome.0);
-                // TODO this can probably be changed to Vec<u8>
-                // However, we want to avoid silent overflows
-                let mut sequence_count: Vec<u16> = Vec::new();
+                let mut sequence_count: Vec<u8> = Vec::new();
                 for item in genome.1 {
                     let range = item.expect("IO Error reading from BLAST file");
                     if range.end > sequence_count.len() {
