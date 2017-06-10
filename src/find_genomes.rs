@@ -11,11 +11,13 @@ use csv;
 pub struct Gene {
     pub name: Option<String>,
     pub product: String,
+    pub prev_gene: Option<(Option<String>, String)>,
 }
 
 pub struct GffIter {
     reader: BufReader<File>,
     buffer: Vec<u8>,
+    prev_gene: Option<(Option<String>, String)>,
 }
 
 impl Iterator for GffIter {
@@ -98,9 +100,16 @@ impl Iterator for GffIter {
                     continue;
                 }
             };
+            let prev_gene = if name == None && product == "hypothetical protein" {
+                self.prev_gene.clone()
+            } else {
+                self.prev_gene = Some((name.clone(), product.clone()));
+                None
+            };
             return Some(Ok((Gene {
                 name: name,
                 product: product,
+                prev_gene: prev_gene,
             }, start..end)));
         }
     }
@@ -218,6 +227,7 @@ impl Iterator for GenomeIter {
                     let gff_iter = GffIter {
                         reader: BufReader::new(gff_file),
                         buffer: Vec::new(),
+                        prev_gene: None,
                     };
                     let blast_reader = csv::ReaderBuilder::new()
                         .delimiter(b'\t')

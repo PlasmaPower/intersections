@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicU32, AtomicU64};
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -18,8 +19,10 @@ pub struct AtomicGeneData {
 
 #[derive(Serialize)]
 pub struct FinalGeneData {
-    pub name: String,
+    pub name: Cow<'static, str>,
     pub product: String,
+    pub prev_name: Cow<'static, str>,
+    pub prev_product: Cow<'static, str>,
     pub total_overlap: u64,
     pub genome_count: u32,
     pub start_avg: f64,
@@ -55,9 +58,15 @@ impl AtomicGeneData {
         let n_float = n as f64;
         let start_avg = (self.start_sum.into_inner() as f64) / n_float;
         let end_avg = (self.end_sum.into_inner() as f64) / n_float;
+        let (prev_name, prev_product) = match gene.prev_gene {
+            None => ("".into(), "".into()),
+            Some((name, product)) => (name.map(Into::into).unwrap_or_else(|| "unknown".into()), product.into()),
+        };
         FinalGeneData {
-            name: gene.name.unwrap_or_else(|| "unknown".to_string()),
+            name: gene.name.map(Into::into).unwrap_or_else(|| "unknown".into()),
             product: gene.product,
+            prev_name: prev_name,
+            prev_product: prev_product,
             total_overlap: self.overlap.into_inner(),
             genome_count: self.genome_count.into_inner(),
             start_avg: start_avg,
