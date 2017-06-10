@@ -1,10 +1,10 @@
 #![feature(integer_atomics)]
 
 use std::thread;
-use std::io::{self, Write};
+use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{self, AtomicU64};
-use std::collections::HashMap;
+use std::ops::Deref;
+use std::collections::{HashSet, HashMap};
 
 extern crate csv;
 
@@ -24,19 +24,8 @@ extern crate clap;
 mod find_genomes;
 use find_genomes::{find_genomes, Gene};
 
-fn print_counts<I: IntoIterator<Item=(Gene, u64)>, W: Write>(writer: &mut csv::Writer<W>, gene_counts: I) {
-    for (gene, count) in gene_counts {
-        let tmp;
-        let name = match gene.name {
-            Some(name) => {
-                tmp = name;
-                tmp.as_str()
-            }
-            None => "unknown",
-        };
-        writer.write_record(&[name, gene.product.as_str(), count.to_string().as_str()]).expect("IO Error writing to CSV");
-    }
-}
+mod gene_data;
+use gene_data::AtomicGeneData;
 
 fn main() {
     let args = load_yaml!("../cli.yml");
@@ -44,20 +33,23 @@ fn main() {
     env_logger::init().unwrap();
     let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
     let mut pool = make_pool(thread_count - 1).unwrap();
-    let genomes = find_genomes(args.value_of("directory").unwrap()).expect("Failed to find genomes");
-    let mut gene_counts: HashMap<Gene, Arc<AtomicU64>> = HashMap::new();
-    let genomes = genomes.map(|genome| {
-        let genome = genome.expect("Failed to list and open genomes");
-        info!("Found genome {}", genome.name);
-        let gff = genome.gff_iter
-            .map(|item| item.expect("Error reading from GFF file"))
-            .map(|(gene, range)| {
-                let count_ref = gene_counts.entry(gene).or_insert_with(|| Arc::new(AtomicU64::new(0)));
-                (count_ref.clone(), range)
-            })
-            .collect::<Vec<_>>();
-        (genome.name, genome.blast_iter, gff)
-    }).collect::<Vec<_>>();
+    let mut gene_counts: HashMap<Gene, Arc<AtomicGeneData>> = HashMap::new();
+    let genomes = find_genomes(args.value_of("directory").unwrap())
+        .expect("Failed to find genomes")
+        .map(|genome| {
+            let genome = genome.expect("Failed to list and open genomes");
+            info!("Found genome {}", genome.name);
+            let gff = genome.gff_iter
+                .map(|item| item.expect("Error reading from GFF file"))
+                .map(|(gene, range)| {
+                    let counts_ref = gene_counts.entry(gene)
+                        .or_insert_with(Default::default);
+                    (counts_ref.clone(), range)
+                })
+                .collect::<Vec<_>>();
+            (genome.name, genome.blast_iter, gff)
+        })
+        .collect::<Vec<_>>();
     if genomes.is_empty() {
         warn!("Failed to find genomes to process");
     }
@@ -69,7 +61,7 @@ fn main() {
                 let thread_name = our_thread.name().unwrap_or("[unknown]");
                 info!("Thread {}: now working on: {}", thread_name, genome.0);
                 let mut sequence_count: Vec<u8> = Vec::new();
-                for item in genome.1 {
+                for item in genome.1 { // blast
                     let range = item.expect("IO Error reading from BLAST file");
                     if range.end > sequence_count.len() {
                         sequence_count.resize(range.end, 0);
@@ -78,14 +70,32 @@ fn main() {
                         sequence_count[index] += 1;
                     }
                 }
-                for (count, range) in genome.2 {
+                let mut genes_encountered = HashSet::new();
+                for (data, range) in genome.2 { // gff (preprocessed)
                     let mut tmp_count: u64 = 0;
-                    for index in range {
-                        if let Some(x) = sequence_count.get(index) {
-                            tmp_count += (*x).into();
+                    let mut index = range.start;
+                    while index < range.end {
+                        if let Some(&x) = sequence_count.get(index) {
+                            if x > 0 {
+                                let range_end = range.end;
+                                // A bit hacky, but this should always work
+                                let first_in_genome = genes_encountered.insert(data.deref() as *const _);
+                                data.first_overlap(range, first_in_genome);
+                                tmp_count += x.into();
+                                // Loop unrolling might allow this code to be simpler
+                                // However, assuming it gets unrolled might be a bad idea
+                                // This way it'll always be fast
+                                for i in (index + 1)..range_end {
+                                    if let Some(&x) = sequence_count.get(i) {
+                                        tmp_count += x.into();
+                                    }
+                                }
+                                break;
+                            }
                         }
+                        index += 1;
                     }
-                    count.fetch_add(tmp_count, atomic::Ordering::Relaxed);
+                    data.total_overlap(tmp_count);
                 }
             });
         }
@@ -93,17 +103,25 @@ fn main() {
     info!("Finished counting");
     let stdout = io::stdout();
     let mut writer = csv::Writer::from_writer(stdout.lock());
-    writer.write_record(&["name", "product", "count"]).expect("IO Error writing to CSV");
     let gene_counts = gene_counts
         .into_iter()
-        .map(|(gene, count)| (gene, Arc::try_unwrap(count).unwrap().into_inner()));
+        .map(|(gene, data)| {
+            match Arc::try_unwrap(data) {
+                Ok(data) => data.finalize(gene),
+                Err(_) => panic!("Internal error: duplicate count for gene {:?}", gene),
+            }
+        });
     if args.is_present("sort") {
         let mut gene_counts = gene_counts.collect::<Vec<_>>();
         // descending sort by count
-        gene_counts.sort_by(|ref a, ref b| b.1.cmp(&a.1));
-        print_counts(&mut writer, gene_counts);
+        gene_counts.sort_by(|ref a, ref b| b.total_overlap.cmp(&a.total_overlap));
+        for count in gene_counts {
+            writer.serialize(count).expect("Failed to write gene counts");
+        }
     } else {
-        print_counts(&mut writer, gene_counts);
+        for count in gene_counts {
+            writer.serialize(count).expect("Failed to write gene counts");
+        }
     }
     writer.flush().expect("IO Error flushing CSV");
 }
