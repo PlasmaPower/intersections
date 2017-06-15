@@ -1,3 +1,4 @@
+use std::f64;
 use std::ops::Range;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU32, AtomicU64};
@@ -33,6 +34,9 @@ pub struct FinalGeneData {
 }
 
 fn stdev(n: u32, avg: f64, squared_sum: u64) -> f64 {
+    if n <= 1 {
+        return f64::NAN;
+    }
     ((((squared_sum as f64) - (n as f64)*avg*avg) as f64) / ((n - 1) as f64)).sqrt()
 }
 

@@ -5,6 +5,10 @@ use std::io;
 use std::sync::Arc;
 use std::ops::Deref;
 use std::collections::{HashSet, HashMap};
+use std::hash::BuildHasherDefault;
+
+extern crate twox_hash;
+use twox_hash::XxHash;
 
 extern crate csv;
 
@@ -33,7 +37,7 @@ fn main() {
     env_logger::init().unwrap();
     let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
     let mut pool = make_pool(thread_count - 1).unwrap();
-    let mut gene_counts: HashMap<Gene, Arc<AtomicGeneData>> = HashMap::new();
+    let mut gene_counts: HashMap<Gene, Arc<AtomicGeneData>, BuildHasherDefault<XxHash>> = HashMap::default();
     let genomes = find_genomes(args.value_of("directory").unwrap())
         .expect("Failed to find genomes")
         .map(|genome| {
@@ -41,10 +45,10 @@ fn main() {
             info!("Found genome {}", genome.name);
             let gff = genome.gff_iter
                 .map(|item| item.expect("Error reading from GFF file"))
-                .map(|(gene, range)| {
+                .map(|(accn, gene, range)| {
                     let counts_ref = gene_counts.entry(gene)
                         .or_insert_with(Default::default);
-                    (counts_ref.clone(), range)
+                    (accn, counts_ref.clone(), range)
                 })
                 .collect::<Vec<_>>();
             (genome.name, genome.blast_iter, gff)
@@ -60,9 +64,10 @@ fn main() {
                 let our_thread = thread::current();
                 let thread_name = our_thread.name().unwrap_or("[unknown]");
                 info!("Thread {}: now working on: {}", thread_name, genome.0);
-                let mut sequence_count: Vec<u8> = Vec::new();
+                let mut sequence_counts: HashMap<Vec<u8>, Vec<u8>, BuildHasherDefault<XxHash>> = HashMap::default();
                 for item in genome.1 { // blast
-                    let range = item.expect("IO Error reading from BLAST file");
+                    let (accn, range) = item.expect("IO Error reading from BLAST file");
+                    let sequence_count = sequence_counts.entry(accn).or_insert_with(Vec::new);
                     if range.end > sequence_count.len() {
                         sequence_count.resize(range.end, 0);
                     }
@@ -70,10 +75,14 @@ fn main() {
                         sequence_count[index] += 1;
                     }
                 }
-                let mut genes_encountered = HashSet::new();
-                for (data, range) in genome.2 { // gff (preprocessed)
+                let mut genes_encountered: HashSet<_, BuildHasherDefault<XxHash>> = HashSet::default();
+                for (accn, data, range) in genome.2 { // gff (preprocessed)
                     let mut tmp_count: u64 = 0;
                     let mut index = range.start;
+                    let sequence_count = match sequence_counts.get(&accn) {
+                        Some(x) => x,
+                        None => continue,
+                    };
                     while index < range.end {
                         if let Some(&x) = sequence_count.get(index) {
                             if x > 0 {

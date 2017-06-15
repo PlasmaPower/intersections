@@ -21,9 +21,9 @@ pub struct GffIter {
 }
 
 impl Iterator for GffIter {
-    type Item = io::Result<(Gene, Range<usize>)>;
+    type Item = io::Result<(Vec<u8>, Gene, Range<usize>)>;
 
-    fn next(&mut self) -> Option<io::Result<(Gene, Range<usize>)>> {
+    fn next(&mut self) -> Option<io::Result<(Vec<u8>, Gene, Range<usize>)>> {
         loop {
             self.buffer.clear();
             match self.reader.read_until(b'\n', &mut self.buffer) {
@@ -38,7 +38,8 @@ impl Iterator for GffIter {
                 continue;
             }
             let mut line = line.splitn(9, |x| *x == b'\t');
-            let start: usize = match line.nth(3) {
+            let accn = line.next().unwrap();
+            let start: usize = match line.nth(2) {
                 Some(x) => match str::from_utf8(x).ok().and_then(|x| x.parse().ok()) {
                     Some(x) => x,
                     None => {
@@ -59,12 +60,18 @@ impl Iterator for GffIter {
                 None => continue,
             };
             // This iterator has already been paritally consumed
-            // 7th index - nth(3) - next()
-            // 7 - (3 + 1) - 1
+            // 7th index - next() - nth(2) - next()
+            // 7 - 1 - (2 + 1) - 1
             // 3
             let descriptors = match line.nth(3) {
                 Some(x) => x.split(|x| *x == b';'),
                 None => continue,
+            };
+            let accn = if accn.starts_with(b"accn_") {
+                Vec::from(&accn[5..])
+            } else {
+                warn!("Subject did not start with \"accn_\": {:?}", accn);
+                Vec::from(accn)
             };
             let mut name = None;
             let mut product = None;
@@ -106,7 +113,7 @@ impl Iterator for GffIter {
                 self.prev_gene = Some((name.clone(), product.clone()));
                 None
             };
-            return Some(Ok((Gene {
+            return Some(Ok((accn, Gene {
                 name: name,
                 product: product,
                 prev_gene: prev_gene,
@@ -137,12 +144,18 @@ struct BlastLine {
 pub struct BlastIter(csv::DeserializeRecordsIntoIter<File, BlastLine>);
 
 impl Iterator for BlastIter {
-    type Item = csv::Result<Range<usize>>;
+    type Item = csv::Result<(Vec<u8>, Range<usize>)>;
 
-    fn next(&mut self) -> Option<csv::Result<Range<usize>>> {
+    fn next(&mut self) -> Option<csv::Result<(Vec<u8>, Range<usize>)>> {
         self.0.next().map(|line| {
             line.map(|line| {
-                (line.s_start..line.s_end)
+                let accn = if line.subject.starts_with("accn|") {
+                    line.subject[5..].as_bytes().to_vec()
+                } else {
+                    warn!("Subject did not start with \"accn|\": {}", line.subject);
+                    line.subject.into_bytes()
+                };
+                (accn, line.s_start..line.s_end)
             })
         })
     }
