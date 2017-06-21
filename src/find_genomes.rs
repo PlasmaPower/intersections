@@ -117,7 +117,7 @@ impl Iterator for GffIter {
                 name: name,
                 product: product,
                 prev_gene: prev_gene,
-            }, start..end)));
+            }, start..(end + 1))));
         }
     }
 }
@@ -155,7 +155,7 @@ impl Iterator for BlastIter {
                     warn!("Subject did not start with \"accn|\": {}", line.subject);
                     line.subject.into_bytes()
                 };
-                (accn, line.s_start..line.s_end)
+                (accn, line.s_start..(line.s_end + 1))
             })
         })
     }
