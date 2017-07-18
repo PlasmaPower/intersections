@@ -2,7 +2,9 @@
 authors = ["Lee Bousfield <ljbousfield@gmail.com>"]
 name = "gene-seq-intersections"
 description = "Count intersections between genes and sequences"
-version = "0.2.0"
+repository = "https://github.com/plasmapower/intersections"
+readme = "README.md"
+version = "0.2.1"
 license = "MIT"
 license-file = "LICENSE"
 
