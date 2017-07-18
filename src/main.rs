@@ -10,6 +10,9 @@ use std::hash::BuildHasherDefault;
 extern crate twox_hash;
 use twox_hash::XxHash;
 
+extern crate fnv;
+use fnv::FnvHashMap;
+
 extern crate csv;
 
 extern crate jobsteal;
@@ -19,26 +22,35 @@ use jobsteal::make_pool;
 extern crate log;
 extern crate env_logger;
 
+extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 
 #[macro_use]
 extern crate clap;
 
+extern crate typed_arena;
+
 mod find_genomes;
-use find_genomes::{find_genomes, Gene};
+use find_genomes::{find_genomes, Gene, create_arenas};
 
 mod gene_data;
 use gene_data::AtomicGeneData;
 
 fn main() {
+    let arenas = create_arenas();
     let args = load_yaml!("../cli.yml");
     let args = clap::App::from_yaml(args).get_matches();
+    let delimiter = args.value_of("delimiter").unwrap().as_bytes();
+    if delimiter.len() != 1 {
+        panic!("Expected 1 byte delimiter, but found multiple bytes: {:?}", delimiter);
+    }
+    let delimiter = delimiter[0];
     env_logger::init().unwrap();
     let thread_count: usize = args.value_of("threads").unwrap().parse().expect("Failed to parse thread count");
     let mut pool = make_pool(thread_count - 1).unwrap();
     let mut gene_counts: HashMap<Gene, Arc<AtomicGeneData>, BuildHasherDefault<XxHash>> = HashMap::default();
-    let genomes = find_genomes(args.value_of("directory").unwrap())
+    let genomes = find_genomes(&arenas, args.value_of("directory").unwrap())
         .expect("Failed to find genomes")
         .map(|genome| {
             let genome = genome.expect("Failed to list and open genomes");
@@ -64,7 +76,7 @@ fn main() {
                 let our_thread = thread::current();
                 let thread_name = our_thread.name().unwrap_or("[unknown]");
                 info!("Thread {}: now working on: {}", thread_name, genome.0);
-                let mut sequence_counts: HashMap<Vec<u8>, Vec<u8>, BuildHasherDefault<XxHash>> = HashMap::default();
+                let mut sequence_counts: FnvHashMap<u64, Vec<u8>> = HashMap::default();
                 for item in genome.1 { // blast
                     let (accn, range) = item.expect("IO Error reading from BLAST file");
                     let sequence_count = sequence_counts.entry(accn).or_insert_with(Vec::new);
@@ -111,7 +123,14 @@ fn main() {
     });
     info!("Finished counting");
     let stdout = io::stdout();
-    let mut writer = csv::Writer::from_writer(stdout.lock());
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(delimiter)
+        .has_headers(false) // we'll write them manually
+        .from_writer(stdout.lock());
+    writer.write_record(&["name", "product", "total_overlap",
+                          "genome_count", "start_avg", "start_stdev",
+                          "end_avg", "end_stdev", "length_avg"])
+        .expect("Failed to write headers");
     let gene_counts = gene_counts
         .into_iter()
         .map(|(gene, data)| {

@@ -1,5 +1,5 @@
 name: intersections
-version: "0.1.0"
+version: "0.2.0"
 author: Lee Bousfield <ljbousfield@gmail.com>
 about: Finds and counts intersections between genomes and sequences
 args:
@@ -17,3 +17,8 @@ args:
       short: s
       long: sort
       help: When enabled, sort the output by count (descending)
+  - delimiter:
+      short: d
+      long: delimiter
+      default_value: "\t"
+      help: The delimited for the output (for CSV a comma, for TSV a tab)
