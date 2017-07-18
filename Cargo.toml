@@ -4,9 +4,8 @@ name = "gene-seq-intersections"
 description = "Count intersections between genes and sequences"
 repository = "https://github.com/plasmapower/intersections"
 readme = "README.md"
-version = "0.2.1"
+version = "0.2.2"
 license = "MIT"
-license-file = "LICENSE"
 
 [[bin]]
 name = "intersections"

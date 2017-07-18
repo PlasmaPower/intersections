@@ -138,7 +138,8 @@ fn main() {
                 Ok(data) => data.finalize(gene),
                 Err(_) => panic!("Internal error: duplicate count for gene {:?}", gene),
             }
-        });
+        })
+        .filter(|data| data.total_overlap != 0);
     if args.is_present("sort") {
         let mut gene_counts = gene_counts.collect::<Vec<_>>();
         // descending sort by count
