@@ -93,85 +93,102 @@ impl GeneBase {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum GeneAnchor<T> {
+    Normal(T),
+    Start,
+    End,
+}
+
+impl<T> From<T> for GeneAnchor<T> {
+    fn from(other: T) -> GeneAnchor<T> {
+        GeneAnchor::Normal(other)
+    }
+}
+
+impl<'a> GeneAnchor<&'a GeneBase> {
+    fn get_name(&self) -> &str {
+        match *self {
+            GeneAnchor::Normal(base) => base.get_name(),
+            GeneAnchor::Start => "START",
+            GeneAnchor::End => "END",
+        }
+    }
+
+    fn get_product(&self) -> &str {
+        match *self {
+            GeneAnchor::Normal(base) => base.get_product(),
+            GeneAnchor::Start => "START",
+            GeneAnchor::End => "END",
+        }
+    }
+}
+
+impl<'a> GeneAnchor<GeneInfo<'a>> {
+    fn display_name(&self) -> LabelString<str, [&str; 1]> {
+        match *self {
+            GeneAnchor::Normal(ref base) => base.display_name(),
+            GeneAnchor::Start => LabelString::new(None, ["START"]),
+            GeneAnchor::End => LabelString::new(None, ["END"]),
+        }
+    }
+
+    fn display_product(&self) -> LabelString<str, [&str; 1]> {
+        match *self {
+            GeneAnchor::Normal(ref base) => base.display_product(),
+            GeneAnchor::Start => LabelString::new(None, ["START"]),
+            GeneAnchor::End => LabelString::new(None, ["END"]),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum RelativePosition {
     Before,
     After,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct GeneInfo<'a> {
-    hypothetical: Option<RelativePosition>,
-    base: &'a GeneBase,
+pub enum GeneInfo<'a> {
+    Hypothetical(RelativePosition, GeneAnchor<&'a GeneBase>),
+    Normal(&'a GeneBase),
 }
 
 impl<'a> From<&'a GeneBase> for GeneInfo<'a> {
     fn from(base: &'a GeneBase) -> Self {
-        GeneInfo {
-            hypothetical: None,
-            base: base,
-        }
+        GeneInfo::Normal(base)
     }
 }
 
 impl<'a> GeneInfo<'a> {
     fn get_label(&self) -> Option<&'static str> {
-        match self.hypothetical {
-            Some(RelativePosition::Before) => Some("HypotheticalBefore"),
-            Some(RelativePosition::After) => Some("HypotheticalAfter"),
-            None => None,
+        match *self {
+            GeneInfo::Hypothetical(RelativePosition::Before, _) => Some("HypotheticalBefore"),
+            GeneInfo::Hypothetical(RelativePosition::After, _) => Some("HypotheticalAfter"),
+            GeneInfo::Normal(_) => None,
         }
     }
 
     fn display_name(&self) -> LabelString<str, [&str; 1]> {
-        LabelString::new(self.get_label(), [self.base.get_name()])
+        let name = match *self {
+            GeneInfo::Normal(base) => base.get_name(),
+            GeneInfo::Hypothetical(_, ref base) => base.get_name(),
+        };
+        LabelString::new(self.get_label(), [name])
     }
 
     fn display_product(&self) -> LabelString<str, [&str; 1]> {
-        LabelString::new(self.get_label(), [self.base.get_product()])
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum GeneDescriptor<'a> {
-    Normal(GeneInfo<'a>),
-    Start,
-    End,
-}
-
-impl<'a> From<&'a GeneBase> for GeneDescriptor<'a> {
-    fn from(base: &'a GeneBase) -> Self {
-        GeneDescriptor::Normal(base.into())
-    }
-}
-
-impl<'a> From<GeneInfo<'a>> for GeneDescriptor<'a> {
-    fn from(info: GeneInfo<'a>) -> Self {
-        GeneDescriptor::Normal(info)
-    }
-}
-
-impl<'a> GeneDescriptor<'a> {
-    fn display_name(&self) -> LabelString<str, [&str; 1]> {
-        match *self {
-            GeneDescriptor::Normal(ref info) => info.display_name(),
-            GeneDescriptor::Start => LabelString::new(None, ["START"]),
-            GeneDescriptor::End => LabelString::new(None, ["END"]),
-        }
-    }
-
-    fn display_product(&self) -> LabelString<str, [&str; 1]> {
-        match *self {
-            GeneDescriptor::Normal(ref info) => info.display_product(),
-            GeneDescriptor::Start => LabelString::new(None, ["START"]),
-            GeneDescriptor::End => LabelString::new(None, ["END"]),
-        }
+        let product = match *self {
+            GeneInfo::Normal(base) => base.get_product(),
+            GeneInfo::Hypothetical(_, ref base) => base.get_product(),
+        };
+        LabelString::new(self.get_label(), [product])
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Gene<'a> {
-    Normal(GeneDescriptor<'a>),
-    Space(GeneDescriptor<'a>, GeneDescriptor<'a>),
+    Normal(GeneInfo<'a>),
+    Space(GeneAnchor<GeneInfo<'a>>, GeneAnchor<GeneInfo<'a>>),
 }
 
 impl<'a> Serialize for Gene<'a> {
@@ -193,15 +210,15 @@ impl<'a> Serialize for Gene<'a> {
 
 fn get_accn(bytes: &[u8]) -> u64 {
     let mut last_index = bytes.len();
-    for i in bytes.len()..0 {
-        match bytes[i] {
+    for (i, b) in bytes.iter().enumerate().rev() {
+        match *b {
             b'0' => {}, // slight optimization: strip leading 0s
             b'1'...b'9' => last_index = i,
             _ => break,
         }
     }
     if last_index == bytes.len() {
-        warn!("Found ACCN without trailing numbers: {}", String::from_utf8_lossy(bytes));
+        error!("Found ACCN without trailing numbers: {}", String::from_utf8_lossy(bytes));
         return 0;
     }
     str::from_utf8(&bytes[last_index..]).unwrap().parse().expect("Found ACCN larger than 2^64 - 1")
@@ -300,7 +317,7 @@ impl<'a> Iterator for GffBaseIter<'a> {
             let product = match product {
                 Some(x) => x,
                 None => {
-                    warn!("Encountered a gene with no product, name: {:?}", name);
+                    error!("Encountered a gene with no product, name: {:?}", name);
                     continue;
                 }
             };
@@ -323,12 +340,13 @@ pub struct GffIter<'a> {
 }
 
 impl<'a> GffIter<'a> {
-    fn next_useful_gene(&mut self) -> io::Result<Option<(u64, &'a GeneBase)>> {
+    fn next_useful_gene(&mut self, accn: u64) -> io::Result<Option<&'a GeneBase>> {
         if let Some(gene) = self.next_useful_gene {
-            return Ok(Some(gene));
+            if accn == gene.0 {
+                return Ok(Some(gene.1));
+            }
         }
         let mut buf_iter = self.gene_buffer.iter().cloned().map(|x| (true, Ok(x))).collect::<Vec<_>>().into_iter();
-        let mut first_accn = None;
         let mut next_normal = None;
         let mut next_hypothetical = None;
         while let Some((from_buf, base)) = buf_iter.next().or_else(|| self.base.next().map(|x| (false, x))) {
@@ -337,10 +355,8 @@ impl<'a> GffIter<'a> {
                 self.gene_buffer.push_back(base.clone());
             }
             let base = (base.0, base.1);
-            match first_accn {
-                None => first_accn = Some(base.0),
-                Some(x) if base.0 != x => break,
-                _ => {},
+            if base.0 != accn {
+                break;
             }
             if base.1.is_normal() {
                 next_normal = Some(base);
@@ -351,7 +367,7 @@ impl<'a> GffIter<'a> {
         }
         let next_useful = next_normal.or(next_hypothetical);
         self.next_useful_gene = next_useful;
-        Ok(next_useful)
+        Ok(next_useful.map(|x| x.1))
     }
 }
 
@@ -369,47 +385,47 @@ impl<'a> Iterator for GffIter<'a> {
                     self.prev_useful_gene = None;
                 }
             }
-            let ret = (|| {
-                if let Some(next_index) = self.next_index {
-                    if base.0 == next_index.0 && base.2.start > next_index.1 {
-                        self.gene_buffer.push_front(base.clone());
-                        let before = self.prev_useful_gene
-                            .map(|(_, x)| x)
-                            .map(Into::into)
-                            .unwrap_or(GeneDescriptor::Start);
-                        let after = if base.1.is_normal() {
-                            base.1.into()
-                        } else {
-                            match self.next_useful_gene() {
-                                Ok(Some(x)) if x.0 == next_index.0 => x.1.into(),
-                                Ok(_) => GeneDescriptor::End,
-                                Err(e) => return Err(e),
-                            }
-                        };
-                        return Ok((base.0, Gene::Space(before, after), next_index.1..base.2.start));
-                    }
+            if let Some(next_index) = self.next_index {
+                if base.0 == next_index.0 && base.2.start > next_index.1 {
+                    self.gene_buffer.push_front(base.clone());
+                    let before = self.prev_useful_gene
+                        .map(|(_, x)| x)
+                        .map(GeneInfo::from)
+                        .map(GeneAnchor::from)
+                        .unwrap_or(GeneAnchor::Start);
+                    let after = if base.1.is_normal() {
+                        GeneInfo::from(base.1).into()
+                    } else {
+                        match self.next_useful_gene(next_index.0) {
+                            Ok(Some(x)) => GeneInfo::from(x).into(),
+                            Ok(None)=> GeneAnchor::End,
+                            Err(e) => return Some(Err(e)),
+                        }
+                    };
+                    self.next_index = Some((base.0, base.2.end));
+                    return Some(Ok((base.0, Gene::Space(before, after), next_index.1..base.2.start)));
                 }
+            }
+            let ret = (|| {
                 if base.1.is_normal() {
                     return Ok((base.0, Gene::Normal(base.1.into()), base.2.clone()));
                 }
-                if let Some((_, before)) = self.prev_useful_gene {
-                    if before.is_normal() {
-                        return Ok((base.0, Gene::Normal(GeneInfo {
-                            hypothetical: Some(RelativePosition::After),
-                            base: before,
-                        }.into()), base.2.clone()));
+                let anchor = match (self.prev_useful_gene, self.next_useful_gene(base.0)?) {
+                    (Some((_, x)), Some(y)) => {
+                        if x.is_normal() || !y.is_normal() {
+                            Some((RelativePosition::After, x))
+                        } else {
+                            Some((RelativePosition::Before, y))
+                        }
                     }
+                    (Some((_, x)), None) => Some((RelativePosition::After, x)),
+                    (None, Some(y)) => Some((RelativePosition::Before, y)),
+                    (None, None) => None,
+                };
+                if let Some((pos, gene)) = anchor {
+                    return Ok((base.0, Gene::Normal(GeneInfo::Hypothetical(pos, gene.into())), base.2.clone()));
                 }
-                if let Some((accn, next)) = self.next_useful_gene()? {
-                    if accn == base.0 {
-                        return Ok((base.0, Gene::Normal(GeneInfo {
-                            hypothetical: Some(RelativePosition::Before),
-                            base: next,
-                        }.into()), base.2.clone()));
-                    }
-                }
-                error!("Encountered ACCN with only one gene, a hypothetical protein");
-                Ok((base.0, Gene::Normal(GeneDescriptor::Start), base.2.clone()))
+                Ok((base.0, Gene::Normal(GeneInfo::Hypothetical(RelativePosition::After, GeneAnchor::Start)), base.2.clone()))
             })();
             let prev_normal = self.prev_useful_gene.as_ref().map(|x| x.1.is_normal()).unwrap_or(false);
             if base.1.is_normal() || !prev_normal {

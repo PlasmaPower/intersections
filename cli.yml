@@ -1,5 +1,5 @@
 name: intersections
-version: "0.2.2"
+version: "0.3.0"
 author: Lee Bousfield <ljbousfield@gmail.com>
 about: Finds and counts intersections between genomes and sequences
 args:
