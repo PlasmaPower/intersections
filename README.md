@@ -1,8 +1,3 @@
-# gene-seq-intersections
-
-Finds intersections between genes and sequences.
-More documentation coming soon™. Run with `--help` for CLI options.
-
 # Intersections
 This program finds the overlap of sequences and genes using format 6 blastn output (http://www.metagenomics.wiki/tools/blast/blastn-output-format-6)
   
