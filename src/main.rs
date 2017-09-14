@@ -102,13 +102,15 @@ fn main() {
                                 // A bit hacky, but this should always work
                                 let first_in_genome = genes_encountered.insert(data.deref() as *const _);
                                 data.first_overlap(range, first_in_genome);
-                                tmp_count += x.into();
+                                let x: u64 = x.into();
+                                tmp_count += x;
                                 // Loop unrolling might allow this code to be simpler
                                 // However, assuming it gets unrolled might be a bad idea
                                 // This way it'll always be fast
                                 for i in (index + 1)..range_end {
                                     if let Some(&x) = sequence_count.get(i) {
-                                        tmp_count += x.into();
+                                        let x: u64 = x.into();
+                                        tmp_count += x;
                                     }
                                 }
                                 break;
